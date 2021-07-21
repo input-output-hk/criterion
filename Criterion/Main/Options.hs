@@ -35,13 +35,13 @@ import Data.Version (showVersion)
 import GHC.Generics (Generic)
 import Options.Applicative
 import Options.Applicative.Help (Chunk(..), tabulate)
-import Options.Applicative.Help.Pretty ((.$.), Ann)
+import Options.Applicative.Help.Pretty ((.$.))
 import Options.Applicative.Types
 import Paths_criterion (version)
 import Prelude ()
 import Prelude.Compat
 import Statistics.Types (mkCL,cl95)
-import Prettyprinter (Doc, pretty)
+import Text.PrettyPrint.ANSI.Leijen (Doc, text)
 import qualified Data.Map as M
 
 -- | How to match a benchmark name.
@@ -211,9 +211,8 @@ describeWith parser = info (helper <*> parser) $
 versionInfo :: String
 versionInfo = "built with criterion " <> showVersion version
 
--- We sort not by name, but by likely frequency of use.
-regressionHelp :: Chunk (Doc Ann)
+regressionHelp :: Chunk Doc
 regressionHelp =
-    fmap (pretty "Regression metrics (for use with --regress):" .$.) $
-      tabulate 24 [(pretty n, pretty d) | (n,(_,d)) <- map f measureKeys]
+    fmap (text "Regression metrics (for use with --regress):" .$.) $
+      tabulate 24 [(text n,text d) | (n,(_,d)) <- map f measureKeys]
   where f k = (k, measureAccessors M.! k)
