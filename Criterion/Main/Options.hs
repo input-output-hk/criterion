@@ -214,5 +214,5 @@ versionInfo = "built with criterion " <> showVersion version
 regressionHelp :: Chunk Doc
 regressionHelp =
     fmap (text "Regression metrics (for use with --regress):" .$.) $
-      tabulate [(text n, text d) | (n,(_,d)) <- map f measureKeys]
+      tabulate 24 [(text n, text d) | (n,(_,d)) <- map f measureKeys]
   where f k = (k, measureAccessors M.! k)
