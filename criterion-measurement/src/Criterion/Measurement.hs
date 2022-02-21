@@ -34,9 +34,10 @@ module Criterion.Measurement
     , threshold
     ) where
 
-import Criterion.Measurement.Types (Benchmarkable(..), Measured(..))
+import Criterion.Measurement.Types (Benchmarkable(..), Measured(..), PerRun (..))
 import Control.DeepSeq (NFData(rnf))
 import Control.Exception (finally,evaluate)
+import Control.Monad (forM)
 import Data.Data (Data, Typeable)
 import Data.Int (Int64)
 import Data.List (unfoldr)
@@ -252,14 +253,16 @@ threshold = 0.03
 
 runBenchmarkable :: Benchmarkable -> Int64 -> (a -> a -> a) -> (Int64 -> IO () -> IO a) -> IO a
 runBenchmarkable Benchmarkable{..} i comb f
-    | perRun = work >>= go (i - 1)
+    | perRun == PerRun = work >>= go (i - 1)
     | otherwise = work
   where
     go 0 result = return result
     go !n !result = work >>= go (n - 1) . comb result
 
-    count | perRun = 1
-          | otherwise = i
+    count = case perRun of
+      PerRun -> 1
+      PerBatch -> i
+      RunIters _ -> 1
 
     work = do
         env <- allocEnv count
@@ -276,20 +279,31 @@ runBenchmarkable_ :: Benchmarkable -> Int64 -> IO ()
 runBenchmarkable_ bm i = runBenchmarkable bm i (\() () -> ()) (const id)
 {-# INLINE runBenchmarkable_ #-}
 
+runBenchmark :: Benchmarkable
+              -> Double
+              -- ^ Lower bound on how long the benchmarking process
+              -- should take.  In practice, this time limit may be
+              -- exceeded in order to generate enough data to perform
+              -- meaningful statistical analyses.
+              -> IO (V.Vector Measured, Double)
+runBenchmark bm timeLimit = case perRun bm of
+  RunIters n -> runBenchmarkIters bm timeLimit n
+  _ -> runBenchmark' bm timeLimit
+
 -- | Run a single benchmark, and return measurements collected while
 -- executing it, along with the amount of time the measurement process
 -- took.
 --
 -- This function initializes the timer before measuring time (refer to the
 -- documentation for 'initializeTime' for more details).
-runBenchmark :: Benchmarkable
-             -> Double
-             -- ^ Lower bound on how long the benchmarking process
-             -- should take.  In practice, this time limit may be
-             -- exceeded in order to generate enough data to perform
-             -- meaningful statistical analyses.
-             -> IO (V.Vector Measured, Double)
-runBenchmark bm timeLimit = do
+runBenchmark' :: Benchmarkable
+              -> Double
+              -- ^ Lower bound on how long the benchmarking process
+              -- should take.  In practice, this time limit may be
+              -- exceeded in order to generate enough data to perform
+              -- meaningful statistical analyses.
+              -> IO (V.Vector Measured, Double)
+runBenchmark' bm timeLimit = do
   initializeTime
   runBenchmarkable_ bm 1
   start <- performGC >> getTime
@@ -314,6 +328,22 @@ runBenchmark bm timeLimit = do
             return (v, endTime - start)
           else loop niters overThresh (count+1) (m:acc)
   loop (squish (unfoldr series 1)) 0 0 []
+
+runBenchmarkIters :: Benchmarkable
+                  -> Double
+                  -> Int
+                  -- ^ Lower bound on how long the benchmarking process
+                  -- should take.  In practice, this time limit may be
+                  -- exceeded in order to generate enough data to perform
+                  -- meaningful statistical analyses.
+                  -> IO (V.Vector Measured, Double)
+runBenchmarkIters bm _timeLimit iters = do
+  initializeTime
+  start <- performGC >> getTime
+  measure <- forM [1..iters] $ \_ ->
+    fst <$> measure bm 1
+  endTime <- getTime
+  pure (V.fromList measure, endTime - start)
 
 -- Our series starts its growth very slowly when we begin at 1, so we
 -- eliminate repeated values.

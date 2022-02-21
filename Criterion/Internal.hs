@@ -29,10 +29,11 @@ import Control.Monad.Trans.Except
 import qualified Data.Binary as Binary
 import Data.Int (Int64)
 import qualified Data.ByteString.Lazy.Char8 as L
-import Criterion.Analysis (analyseSample, noteOutliers)
+import Criterion.Analysis (analyseSample, noteOutliers, analyseSimpleSample)
 import Criterion.IO (header, headerRoot, critVersion, readJSONReports, writeJSONReports)
 import Criterion.IO.Printf (note, printError, prolix, writeCsv)
 import Criterion.Measurement (runBenchmark, runBenchmarkable_, secs)
+import Criterion.Measurement.Types (hasFixedIters)
 import Criterion.Monad (Criterion)
 import Criterion.Report (report)
 import Criterion.Types hiding (measure)
@@ -54,11 +55,13 @@ runOne i desc bm = do
   return (Measurement i desc meas)
 
 -- | Analyse a single benchmark.
-analyseOne :: Int -> String -> V.Vector Measured -> Criterion DataRecord
-analyseOne i desc meas = do
+analyseOne :: Int -> Bool -> String -> V.Vector Measured -> Criterion DataRecord
+analyseOne i simple desc meas = do
   Config{..} <- ask
   _ <- prolix "analysing with %d resamples\n" resamples
-  erp <- runExceptT $ analyseSample i desc meas
+  erp <- runExceptT $ if simple
+    then analyseSimpleSample i desc meas
+    else analyseSample i desc meas
   case erp of
     Left err -> printError "*** Error: %s\n" err
     Right rpt@Report{..} -> do
@@ -103,12 +106,33 @@ analyseOne i desc meas = do
                     in str
                    )
 
+{-}
+analyseOneSimple :: Int -> String -> V.Vector Measured
+                 -> Criterion ()
+analyseOneSimple i desc meas = do
+    erp <- runExceptT $ analyseSimpleSample i desc meas
+    case erp of
+      Left err -> printError "*** Error: %s\n" err
+      Right (stMean, stDev) -> do
+        bs secs "mean" stMean
+        bs secs "std dev" stDev
+  where
+    bs :: (Double -> String) -> String -> Estimate ConfInt Double -> Criterion ()
+    bs f metric e@Estimate{..} =
+      note "%-20s %-10s (%s .. %s%s)\n" metric
+           (f estPoint) (f $ fst $ confidenceInterval e) (f $ snd $ confidenceInterval e)
+           (let cl = confIntCL estError
+                str | cl == cl95 = ""
+                    | otherwise  = printf ", ci %.3f" (confidenceLevel cl)
+            in str
+           )
+-}
 
 -- | Run a single benchmark and analyse its performance.
 runAndAnalyseOne :: Int -> String -> Benchmarkable -> Criterion DataRecord
 runAndAnalyseOne i desc bm = do
   Measurement _ _ meas <- runOne i desc bm
-  analyseOne i desc meas
+  analyseOne i (hasFixedIters bm) desc meas
 
 -- | Run, and analyse, one or more benchmarks.
 runAndAnalyse :: (String -> Bool) -- ^ A predicate that chooses
@@ -139,6 +163,21 @@ runAndAnalyse select bs = do
       liftIO $ hPutStr handle ", "
     liftIO $ L.hPut handle (Aeson.encode (rpt::Report))
 
+
+
+{-}
+  for select bs $ \idx desc bm -> do
+    _ <- note "benchmarking %s\n" desc
+    if (hasFixedIters bm)
+    then do
+      measur <- runAndAnalyseOne idx desc bm
+      liftIO $ print measur
+    else do
+      Analysed rpt <- runAndAnalyseOne idx desc bm
+      unless (idx == 0) $
+        liftIO $ hPutStr handle ", "
+      liftIO $ L.hPut handle (Aeson.encode (rpt::Report))
+-}
   liftIO $ hPutStr handle " ] ]\n"
   liftIO $ hClose handle
 

@@ -25,6 +25,7 @@ module Criterion
     , toBenchmarkable
     , bench
     , bgroup
+    , fixIterations
     -- ** Running a benchmark
     , nf
     , whnf
@@ -44,6 +45,7 @@ import Criterion.IO.Printf (note)
 import Criterion.Internal (runAndAnalyseOne)
 import Criterion.Main.Options (defaultConfig)
 import Criterion.Measurement (initializeTime)
+import Criterion.Measurement.Types (fixIterations)
 import Criterion.Monad (withConfig)
 import Criterion.Types
 

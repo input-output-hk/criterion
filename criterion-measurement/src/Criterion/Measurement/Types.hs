@@ -32,6 +32,7 @@ module Criterion.Measurement.Types
       -- * Benchmark descriptions
       Benchmarkable(..)
     , Benchmark(..)
+    , PerRun (..)
     -- * Measurements
     , Measured(..)
     , fromInt
@@ -50,6 +51,8 @@ module Criterion.Measurement.Types
     , perRunEnv
     , perRunEnvWithCleanup
     , toBenchmarkable
+    , fixIterations
+    , hasFixedIters
     , bench
     , bgroup
     , addPrefix
@@ -86,8 +89,16 @@ data Benchmarkable = forall a . NFData a =>
       { allocEnv :: Int64 -> IO a
       , cleanEnv :: Int64 -> a -> IO ()
       , runRepeatedly :: a -> Int64 -> IO ()
-      , perRun :: Bool
+      , perRun :: PerRun
       }
+
+data PerRun = PerRun | PerBatch | RunIters Int
+  deriving Eq
+
+hasFixedIters :: Benchmarkable -> Bool
+hasFixedIters bm = case perRun bm of
+  RunIters _ -> True
+  _ -> False
 
 noop :: Monad m => a -> m ()
 noop = const $ return ()
@@ -96,9 +107,11 @@ noop = const $ return ()
 -- | Construct a 'Benchmarkable' value from an impure action, where the 'Int64'
 -- parameter indicates the number of times to run the action.
 toBenchmarkable :: (Int64 -> IO ()) -> Benchmarkable
-toBenchmarkable f = Benchmarkable noop (const noop) (const f) False
+toBenchmarkable f = Benchmarkable noop (const noop) (const f) PerBatch
 {-# INLINE toBenchmarkable #-}
 
+fixIterations :: Int -> Benchmarkable -> Benchmarkable
+fixIterations n bm = bm {perRun = RunIters n}
 
 -- | A collection of measurements made while benchmarking.
 --
@@ -545,7 +558,7 @@ perBatchEnvWithCleanup
     -- newly generated environment.
     -> Benchmarkable
 perBatchEnvWithCleanup alloc clean work
-    = Benchmarkable alloc clean (nfIO' rnf . work) False
+    = Benchmarkable alloc clean (nfIO' rnf . work) PerBatch
 
 -- | Create a Benchmarkable where a fresh environment is allocated for every
 -- run of the operation to benchmark. This is useful for benchmarking mutable
@@ -580,7 +593,7 @@ perRunEnvWithCleanup
     -- ^ Function returning the IO action that should be benchmarked with the
     -- newly genereted environment.
     -> Benchmarkable
-perRunEnvWithCleanup alloc clean work = bm { perRun = True }
+perRunEnvWithCleanup alloc clean work = bm { perRun = PerRun }
   where
     bm = perBatchEnvWithCleanup (const alloc) (const clean) work
 

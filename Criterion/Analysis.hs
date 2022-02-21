@@ -19,6 +19,7 @@ module Criterion.Analysis
     , OutlierVariance(..)
     , SampleAnalysis(..)
     , analyseSample
+    , analyseSimpleSample
     , scale
     , analyseMean
     , countOutliers
@@ -163,6 +164,38 @@ analyseSample i name meas = do
   let ov = outlierVariance estMean estStdDev (fromIntegral n)
       an = SampleAnalysis {
                anRegress    = rs
+             , anMean       = estMean
+             , anStdDev     = estStdDev
+             , anOutlierVar = ov
+             }
+  return Report {
+      reportNumber   = i
+    , reportName     = name
+    , reportKeys     = measureKeys
+    , reportMeasured = meas
+    , reportAnalysis = an
+    , reportOutliers = classifyOutliers stime
+    , reportKDEs     = [uncurry (KDE "time") (kde 128 stime)]
+    }
+
+-- | Perform an analysis of a measurement.
+analyseSimpleSample :: Int            -- ^ Experiment number.
+                    -> String         -- ^ Experiment name.
+                    -> V.Vector Measured -- ^ Sample data.
+                    -> ExceptT String Criterion Report
+analyseSimpleSample i name meas = do
+  Config{..} <- ask
+  let ests      = [Mean,StdDev]
+      stime = measure (measTime . rescale) meas
+      n         = G.length meas
+  gen <- lift getGen
+  resamps <- liftIO $ resample gen ests resamples stime
+  (estMean,estStdDev) <- case B.bootstrapBCA confInterval stime resamps of
+    [estMean',estStdDev'] -> return (estMean',estStdDev')
+    ests' -> throwE $ "analyseSample: Expected two estimation functions, received: " ++ show ests'
+  let ov = outlierVariance estMean estStdDev (fromIntegral n)
+      an = SampleAnalysis {
+               anRegress    = []
              , anMean       = estMean
              , anStdDev     = estStdDev
              , anOutlierVar = ov
